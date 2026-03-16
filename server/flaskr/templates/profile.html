@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profile - MobileCall</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="box glass profile-card">
+        <div class="avatar">{{ user[1][0].upper() }}</div>
+        <h1>Welcome, {{ user[1] }}!</h1>
+        <p style="color: var(--text-muted); margin-bottom: 24px;">Member ID: #{{ user[0] }}</p>
+        
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+            <a href="/" class="btn btn-outline" style="width: 100%;">Return Home</a>
+            <a href="/logout" class="btn btn-outline" style="width: 100%; border-color: rgba(239, 68, 68, 0.5); color: #ef4444;">Log Out</a>
+        </div>
+    </div>
+</body>
+</html>
