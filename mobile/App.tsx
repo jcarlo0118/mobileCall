@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { io, Socket } from 'socket.io-client';
+import { MaterialIcons } from '@expo/vector-icons';
 
 // --- PLATFORM CONDITIONAL WEBRTC IMPORTS ---
 let RTCPeerConnection: any;
@@ -80,24 +81,22 @@ export default function App() {
   }, [localStream, remoteStream, callStatus]);
 
   const handleJoin = () => {
-    if (!username || !serverIP) {
-      Alert.alert('Error', 'Please enter username and server IP');
-      return;
-    }
+    // Sanitize IP: remove http://, https://, and any trailing ports or slashes
+    let sanitizedIP = serverIP.trim().replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+    const socketUrl = `http://${sanitizedIP}:3000`;
 
-    const socketUrl = `http://${serverIP}:3000`;
     // Disconnect existing socket if any
     if (socketRef.current) socketRef.current.disconnect();
 
     socketRef.current = io(socketUrl, {
-      transports: ['polling', 'websocket'],
+      transports: ['websocket'],
       forceNew: true,
       reconnection: true,
       reconnectionAttempts: 10,
     });
 
     socketRef.current.on('connect', () => {
-      socketRef.current?.emit('join', username);
+      socketRef.current?.emit('join', username.trim());
       setIsJoined(true);
     });
 
@@ -308,11 +307,17 @@ export default function App() {
           <Text style={{ color: '#fff', fontSize: 32, fontWeight: 'bold' }}>{callerName}</Text>
           {isIncomingCall ? (
             <View style={{ flexDirection: 'row', marginTop: 40 }}>
-              <TouchableOpacity onPress={acceptCall} style={[styles.button, { backgroundColor: '#4CAF50', width: 120 }]}><Text style={{ color: '#fff' }}>Accept</Text></TouchableOpacity>
-              <TouchableOpacity onPress={rejectCall} style={[styles.button, { backgroundColor: '#F44336', width: 120 }]}><Text style={{ color: '#fff' }}>Decline</Text></TouchableOpacity>
+              <TouchableOpacity onPress={acceptCall} style={[styles.roundButton, { backgroundColor: '#4CAF50' }]}>
+                <MaterialIcons name="call" size={32} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={rejectCall} style={[styles.roundButton, { backgroundColor: '#F44336' }]}>
+                <MaterialIcons name="call-end" size={32} color="#fff" />
+              </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity onPress={endCall} style={[styles.button, { backgroundColor: '#F44336', marginTop: 40 }]}><Text style={{ color: '#fff' }}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity onPress={endCall} style={[styles.roundButton, { backgroundColor: '#F44336', marginTop: 40 }]}>
+              <MaterialIcons name="call-end" size={32} color="#fff" />
+            </TouchableOpacity>
           )}
         </View>
       ) : (
@@ -320,21 +325,27 @@ export default function App() {
           <View style={{ flex: 1 }}>
             {Platform.OS === 'web' ? (
               <>
-                <video ref={remoteVideoRef} autoPlay playsInline style={styles.fullScreenVideo} />
-                {isVideoEnabled && <video ref={localVideoRef} autoPlay playsInline muted style={styles.pipVideo} />}
+                <video ref={remoteVideoRef} autoPlay playsInline style={{ ...styles.fullScreenVideo, width: '100%', height: '100%', objectFit: 'contain' }} />
+                {isVideoEnabled && <video ref={localVideoRef} autoPlay playsInline muted style={{ ...styles.pipVideo, objectFit: 'contain' }} />}
               </>
             ) : (
               <>
-                {remoteStream && <RTCView streamURL={remoteStream.toURL()} style={styles.fullScreenVideo} objectFit="cover" />}
-                {localStream && isVideoEnabled && <RTCView streamURL={localStream.toURL()} style={styles.pipVideo} objectFit="cover" zOrder={1} />}
+                {remoteStream && <RTCView streamURL={remoteStream.toURL()} style={styles.fullScreenVideo} objectFit="contain" />}
+                {localStream && isVideoEnabled && <RTCView streamURL={localStream.toURL()} style={styles.pipVideo} objectFit="contain" zOrder={1} />}
               </>
             )}
             {!remoteStream && <View style={styles.center}><Text style={{ color: '#fff' }}>Connecting Media...</Text></View>}
           </View>
           <View style={styles.controls}>
-            <TouchableOpacity onPress={toggleMic} style={[styles.controlBtn, !isMicEnabled && { backgroundColor: 'red' }]}><Text style={{ color: '#fff' }}>{isMicEnabled ? 'Mute' : 'Unmute'}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={toggleVideo} style={[styles.controlBtn, !isVideoEnabled && { backgroundColor: 'red' }]}><Text style={{ color: '#fff' }}>{isVideoEnabled ? 'Cam Off' : 'Cam On'}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={endCall} style={[styles.controlBtn, { backgroundColor: 'red' }]}><Text style={{ color: '#fff' }}>End</Text></TouchableOpacity>
+            <TouchableOpacity onPress={toggleMic} style={[styles.controlBtn, !isMicEnabled && styles.controlBtnOff]}>
+              <MaterialIcons name={isMicEnabled ? "mic" : "mic-off"} size={28} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={toggleVideo} style={[styles.controlBtn, !isVideoEnabled && styles.controlBtnOff]}>
+              <MaterialIcons name={isVideoEnabled ? "videocam" : "videocam-off"} size={28} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={endCall} style={[styles.controlBtn, styles.hangupBtn]}>
+              <MaterialIcons name="call-end" size={28} color="#fff" />
+            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -355,6 +366,9 @@ const styles = StyleSheet.create({
   callContainer: { flex: 1, backgroundColor: '#000' },
   fullScreenVideo: { flex: 1, backgroundColor: '#222' },
   pipVideo: { position: 'absolute', top: 20, right: 20, width: 100, height: 150, backgroundColor: '#000', borderRadius: 10 },
-  controls: { flexDirection: 'row', justifyContent: 'space-around', padding: 30, backgroundColor: 'rgba(0,0,0,0.8)' },
-  controlBtn: { padding: 15, backgroundColor: '#444', borderRadius: 10, minWidth: 80, alignItems: 'center' },
+  controls: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 30, paddingHorizontal: 40, backgroundColor: 'rgba(0,0,0,0.8)', position: 'absolute', bottom: 0, left: 0, right: 0 },
+  controlBtn: { width: 60, height: 60, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30, justifyContent: 'center', alignItems: 'center' },
+  controlBtnOff: { backgroundColor: '#F44336' },
+  hangupBtn: { backgroundColor: '#F44336' },
+  roundButton: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginHorizontal: 20 },
 });
