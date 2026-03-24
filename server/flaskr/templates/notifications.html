@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notifications - MobileCall</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .invite-card {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 20px;
+            text-align: left;
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            border-radius: 8px;
+            cursor: pointer;
+            border: none;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-accept { background: var(--success); color: white; }
+        .btn-decline { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); }
+        .btn-accept:hover { background: #0ea271; transform: translateY(-1px); }
+        .btn-decline:hover { background: rgba(239, 68, 68, 0.2); }
+    </style>
+</head>
+<body>
+    <div class="box glass" style="max-width: 500px;">
+        <h1>Inbox</h1>
+        <p style="margin-bottom: 24px;">Manage your invitations and alerts.</p>
+
+        <div id="notificationsList">
+            <p style="padding: 40px; color: var(--text-muted);">Checking for notifications...</p>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <a href="/user/{{ session['logged_in_user'] }}" class="btn-outline">Back to Profile</a>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('auth_token');
+
+        async function loadNotifications() {
+            const listDiv = document.getElementById('notificationsList');
+            try {
+                const res = await fetch('/api/notifications', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                if (data.status === 'successful') {
+                    if (data.notifications.length === 0) {
+                        listDiv.innerHTML = '<p style="padding: 40px; color: var(--text-muted);">You have no pending invitations.</p>';
+                        return;
+                    }
+                    listDiv.innerHTML = data.notifications.map(n => `
+                        <div class="list-item invite-card">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                <div>
+                                    <h4 style="margin-bottom: 4px;">Join "${n.family_name}"?</h4>
+                                    <p style="font-size: 0.8rem;">Invited by <strong>${n.sender_name}</strong></p>
+                                </div>
+                                <span class="badge badge-pending">New</span>
+                            </div>
+                            <div class="actions">
+                                <button class="btn-sm btn-accept" onclick="respond(${n.id}, 'accepted')">Accept</button>
+                                <button class="btn-sm btn-decline" onclick="respond(${n.id}, 'rejected')">Decline</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (e) {
+                listDiv.innerHTML = '<p style="color: var(--danger);">Failed to load notifications.</p>';
+            }
+        }
+
+        async function respond(inviteId, response) {
+            const res = await fetch('/api/notifications/respond', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ invite_id: inviteId, response })
+            });
+            const result = await res.json();
+            if (result.status === 'successful') {
+                loadNotifications();
+            }
+        }
+
+        if (token) loadNotifications();
+    </script>
+</body>
+</html>

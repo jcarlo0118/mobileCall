@@ -16,7 +16,8 @@
       "bundleIdentifier": "com.anonymous.mobilecall",
       "infoPlist": {
         "NSCameraUsageDescription": "Allow MobileCall to access your camera",
-        "NSMicrophoneUsageDescription": "Allow MobileCall to access your microphone"
+        "NSMicrophoneUsageDescription": "Allow MobileCall to access your microphone",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "bitcode": false
     },
@@ -48,6 +49,14 @@
         {
           "cameraPermission": "Allow MobileCall to access your camera",
           "microphonePermission": "Allow MobileCall to access your microphone"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

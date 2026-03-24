@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create Family - MobileCall</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="box glass">
+        <div class="avatar">F</div>
+        <h1>New Family</h1>
+        <p style="margin-bottom: 30px;">Give your group a name to get started.</p>
+        
+        <form id="createFamilyForm">
+            <div class="form-group">
+                <label for="familyName">Family Name</label>
+                <input type="text" id="familyName" class="inputField" placeholder="e.g. The Smith Family" required>
+            </div>
+            <button type="submit" class="submitButton">Create Family</button>
+        </form>
+        
+        <div style="margin-top: 24px;">
+            <a href="/user/{{ session['logged_in_user'] }}" class="btn-outline">Cancel</a>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('auth_token');
+        document.getElementById('createFamilyForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('familyName').value;
+            const res = await fetch('/api/family/create', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ name })
+            });
+            const result = await res.json();
+            if (result.status === 'successful') {
+                window.location.href = '/family/settings';
+            } else {
+                alert(result.message);
+            }
+        };
+    </script>
+</body>
+</html>

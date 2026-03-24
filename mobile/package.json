@@ -1,6 +1,6 @@
 {
   "name": "mobile",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -14,8 +14,10 @@
     "@expo/vector-icons": "^15.1.1",
     "axios": "^1.13.6",
     "expo": "~54.0.33",
+    "expo-build-properties": "~1.0.10",
     "expo-dev-client": "~6.0.20",
     "expo-image-picker": "^55.0.13",
+    "expo-network": "^55.0.9",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",

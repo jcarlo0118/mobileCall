@@ -3,19 +3,99 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Profile - MobileCall</title>
+    <title>{{ user['username'] }}'s Profile - MobileCall</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <div class="box glass profile-card">
-        <div class="avatar">{{ user[1][0].upper() }}</div>
-        <h1>Welcome, {{ user[1] }}!</h1>
-        <p style="color: var(--text-muted); margin-bottom: 24px;">Member ID: #{{ user[0] }}</p>
+    <div class="box glass" style="max-width: 500px;">
+        <div class="nav-pills">
+            <a href="#" class="nav-pill active">Profile</a>
+            <a href="/notifications" class="nav-pill">
+                Notifications <span id="notifBadge" style="display:none; color: var(--accent);">●</span>
+            </a>
+            <a href="/family/settings" class="nav-pill">Family</a>
+        </div>
+
+        <div class="avatar">
+            {{ user['username'][0] | upper }}
+        </div>
         
+        <h1 style="margin-bottom: 4px;">{{ user['username'] }}</h1>
+        <p style="font-size: 0.9rem; margin-bottom: 24px;">
+            <span class="badge badge-success">{{ user['role'] or 'Guest' }}</span>
+            {% if user['age'] %} • {{ user['age'] }} years old{% endif %}
+        </p>
+
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 20px; padding: 24px; text-align: left; margin-bottom: 24px;">
+            <h3 style="font-size: 1rem; margin-bottom: 16px;">Account Settings</h3>
+            <form id="profileUpdateForm">
+                <div class="form-group">
+                    <label>Your Role</label>
+                    <select id="roleSelect" class="inputField" style="appearance: none;">
+                        <option value="caregiver" {% if user['role'] == 'caregiver' %}selected{% endif %}>Caregiver</option>
+                        <option value="grandparent" {% if user['role'] == 'grandparent' %}selected{% endif %}>Grandparent</option>
+                        <option value="admin" {% if user['role'] == 'admin' %}selected{% endif %}>Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Age</label>
+                    <input type="number" id="ageInput" class="inputField" value="{{ user['age'] or '' }}" placeholder="Enter your age">
+                </div>
+                <button type="submit" class="submitButton" style="padding: 10px;">Update Profile</button>
+            </form>
+        </div>
+
         <div style="display: flex; flex-direction: column; gap: 12px;">
-            <a href="/" class="btn btn-outline" style="width: 100%;">Return Home</a>
-            <a href="/logout" class="btn btn-outline" style="width: 100%; border-color: rgba(239, 68, 68, 0.5); color: #ef4444;">Log Out</a>
+            {% if not user['family_id'] %}
+            <a href="/family/create" class="submitButton" style="background: var(--accent); text-decoration: none;">Create Your Family</a>
+            {% else %}
+            <a href="/family/settings" class="btn-outline">Manage Family Members</a>
+            {% endif %}
+            <a href="/logout" class="btn-outline" style="border-color: rgba(239, 68, 68, 0.2); color: var(--danger);">Logout</a>
         </div>
     </div>
+
+    <script>
+        const token = localStorage.getItem('auth_token');
+
+        // Check for notifications badge
+        async function checkNotifications() {
+            if (!token) return;
+            try {
+                const res = await fetch('/api/notifications', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                if (data.status === 'successful' && data.notifications.length > 0) {
+                    document.getElementById('notifBadge').style.display = 'inline';
+                }
+            } catch (e) {}
+        }
+
+        document.getElementById('profileUpdateForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const role = document.getElementById('roleSelect').value;
+            const age = document.getElementById('ageInput').value;
+            
+            const res = await fetch('/api/profile/update', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ role, age })
+            });
+            const result = await res.json();
+            if (result.status === 'successful') {
+                alert('Profile updated successfully!');
+                location.reload();
+            } else {
+                alert(result.message);
+            }
+        };
+
+        checkNotifications();
+    </script>
 </body>
 </html>

@@ -4,14 +4,14 @@ async function handleLogin(event) {
 	const uName = document.querySelector('#username').value;
 	const passW = document.querySelector('#user_password').value;
 
-	if (!(uName.length > 5)) {
-        alert("Username too short, username must be more than 5 characters");
-        return
+	if (uName.length <= 5) {
+        console.log("Username too short, username must be more than 5 characters");
+        return;
     }
 
-    if (!(passW.length > 6)) {
-    	alert("Password too short, password must be more than 6 characters");
-    	return
+    if (passW.length <= 6) {
+    	console.log("Password too short, password must be more than 6 characters");
+    	return;
 	}
 
 	const dataToSend = {
@@ -21,7 +21,7 @@ async function handleLogin(event) {
 
 	try {
 		const response = await fetch('/login', {
-			method: 'POST', // POST keeps passwords hidden
+			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json'
 			},
@@ -29,26 +29,22 @@ async function handleLogin(event) {
 		});
 
 		const result = await response.json();
-
 		console.log("Server response:", result);
 
 		if (result.status === "successful") {
-			alert("Login successful.. redirecting to profile page");
+			console.log("Login successful, storing token...");
+            localStorage.setItem('auth_token', result.token);
+            localStorage.setItem('user_data', JSON.stringify(result.user));
 			window.location.href = `/user/${uName}`; 
-		} else if (result.status === "unsuccessful") {
-			alert("Login unsuccessful, account not found or wrong credentials");
+		} else {
+			console.log("Login unsuccessful:", result.message);
 		}
-	}catch (error) {
+	} catch (error) {
 		console.log("Network error:", error);
 	}
-
 }
 
-
-
 const loginForm = document.querySelector('#loginForm');
-
 if (loginForm) {
-
-	loginForm.addEventListener('submit', handleLogin)
+	loginForm.addEventListener('submit', handleLogin);
 }
