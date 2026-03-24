@@ -16,9 +16,11 @@ from flask import session
 
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
-from setupDB import add_new_user
-from setupDB import get_user
+from setupDB import add_new_user, get_user, update_profile_image
+from flaskr.services.eligibility_service import EligibilityService
+from flaskr.services.image_service import ImageProcessingService
 
 # Note: Eventlet/Gevent monkey patching is disabled to ensure compatibility 
 # with Python 3.13 + Windows internals. The server will run in 'threading' mode.
@@ -27,75 +29,145 @@ app = Flask(__name__)
 app.secret_key = 'super_secret_key_change_this_later'
 CORS(app)
 
+# Configure upload folder
+UPLOAD_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), 'static', 'uploads'))
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
 # Explicitly using async_mode='threading' for compatibility with Python 3.13
 # manage_session=False fixes "AttributeError: property 'session' of 'RequestContext' object has no setter" in newer Flask versions
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', manage_session=False, logger=True, engineio_logger=True)
 
 users = {} # {socket_id: username}
-
+image_processor = ImageProcessingService()
 
 @app.route("/")
 def homepage():
 	return render_template("index.html")
 
-@app.route("/register", methods = ['GET', 'POST'])
+@app.route("/register", methods = ['POST'])
 def register():
-    if request.method == 'POST':
-        return do_the_register()
-    else:
-        return show_the_register_form()
-
-def show_the_register_form():
-    return render_template("auth/register.html")
-
-def do_the_register():
-    #unpacks json data sent from js
     data = request.get_json()
+    if not data:
+        return jsonify({"status": "unsuccessful", "message": "Invalid JSON data"}), 400
 
-    #extracts specific variables 
     uName = data.get('username')
     passW = data.get('password')
+    age = data.get('age')
+    sub_status = data.get('subscription_status', 'basic')
+    is_hoh = data.get('is_head_of_household', False)
+    household_id = data.get('household_id')
 
-    is_successful = add_new_user(uName, passW)
+    if not uName or not passW:
+        return jsonify({"status": "unsuccessful", "message": "Username and password required"}), 400
 
-    if(is_successful == True):
-        return jsonify({"status": "successful", "message": f"Registration received for {uName}.. redirecting to login page"})
-    elif (is_successful == False):
-        return jsonify({"status": "unsuccessful", "message": f"Registration was not received for {uName} due to an error, the username is already taken"})
-    #sends result data to the browser through JSON
-  
+    # Calculate eligibility
+    is_eligible = EligibilityService.is_eligible(age, sub_status)
 
-@app.route('/login', methods = ['GET', 'POST'])
+    is_successful = add_new_user(uName, passW, age, sub_status, is_eligible, is_hoh, household_id)
+
+    if is_successful == True:
+        return jsonify({
+            "status": "successful", 
+            "message": f"Registration received for {uName}",
+            "is_voip_eligible": is_eligible
+        })
+    elif is_successful == "HOH_EXISTS":
+        return jsonify({"status": "unsuccessful", "message": f"A head of household already exists for household {household_id}"}), 409
+    else:
+        return jsonify({"status": "unsuccessful", "message": f"Registration failed, username {uName} may be taken"}), 400
+
+@app.route('/login', methods = ['POST'])
 def login():
-    if request.method == 'POST':
-        return do_the_login()
-    else:
-        return show_the_login_form()
-
-def show_the_login_form():
-	return render_template("auth/login.html")
-
-def do_the_login():
     data = request.get_json()
+    if not data:
+        return jsonify({"status": "unsuccessful", "message": "Invalid JSON data"}), 400
 
     uName = data.get('username')
     passW = data.get('password')
 
-    user_row = get_user(uName) # Pass the username here!
+    user_row = get_user(uName)
 
-    #if the returned tuple is empty
-    if (user_row is None):
-        return jsonify({"status": "unsuccessful", "message": "Login unsuccessful, username not found"})
+    if user_row is None:
+        return jsonify({"status": "unsuccessful", "message": "Login unsuccessful, username not found"}), 404
     
-    #If they exist, check the password (stored at index 2)
     hashed_db_password = user_row[2]
 
-    if (bcrypt.checkpw(passW.encode('utf-8'), hashed_db_password)):
-        #saves the name in the cookie
+    if bcrypt.checkpw(passW.encode('utf-8'), hashed_db_password):
         session['logged_in_user'] = uName
-        return jsonify({"status": "successful", "message": "Login successful"})
+        # Return user data including eligibility
+        # User row indices: 0:id, 1:username, 2:password, 3:age, 4:sub_status, 5:is_voip_eligible, 6:is_hoh, 7:household_id, 8:profile_image
+        return jsonify({
+            "status": "successful", 
+            "message": "Login successful",
+            "user": {
+                "username": user_row[1],
+                "is_voip_eligible": bool(user_row[5]),
+                "is_head_of_household": bool(user_row[6]),
+                "household_id": user_row[7]
+            }
+        })
     else:
-        return jsonify({"status": "unsuccessful", "message": "Login unsuccessful, password not correct"})
+        return jsonify({"status": "unsuccessful", "message": "Login unsuccessful, password not correct"}), 401
+
+@app.route("/upload-image", methods=['POST'])
+def upload_image():
+    if 'image' not in request.files:
+        return jsonify({"status": "unsuccessful", "message": "No image part"}), 400
+    
+    file = request.files['image']
+    username = request.form.get('username')
+    
+    if file.filename == '' or not username:
+        return jsonify({"status": "unsuccessful", "message": "No selected file or username"}), 400
+
+    filename = secure_filename(f"{username}_group_{file.filename}")
+    temp_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(temp_path)
+
+    try:
+        faces, img_shape = image_processor.detect_faces(temp_path)
+        return jsonify({
+            "status": "successful",
+            "message": f"Detected {len(faces)} faces",
+            "faces": faces,
+            "image_id": filename
+        })
+    except Exception as e:
+        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
+
+@app.route("/finalize-crop", methods=['POST'])
+def finalize_crop():
+    data = request.get_json()
+    username = data.get('username')
+    image_id = data.get('image_id')
+    face_coords = data.get('face') # {x, y, w, h}
+
+    if not username or not image_id or not face_coords:
+        return jsonify({"status": "unsuccessful", "message": "Missing data"}), 400
+
+    input_path = os.path.join(app.config['UPLOAD_FOLDER'], image_id)
+    output_filename = f"{username}_profile.jpg"
+    output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+
+    try:
+        image_processor.crop_face(
+            input_path, 
+            face_coords['x'], 
+            face_coords['y'], 
+            face_coords['w'], 
+            face_coords['h'], 
+            output_path
+        )
+        # Update database
+        update_profile_image(username, f"/static/uploads/{output_filename}")
+        return jsonify({
+            "status": "successful",
+            "message": "Profile image updated",
+            "profile_image": f"/static/uploads/{output_filename}"
+        })
+    except Exception as e:
+        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
 
 @app.route("/user/<username>")
 def profile(username):
