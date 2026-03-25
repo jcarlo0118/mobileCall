@@ -1,18 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  StyleSheet,
-  Text,
-  View,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  Alert,
-  SafeAreaView,
   Platform,
+  Alert,
   Switch,
-  Image,
-  ScrollView,
 } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Image, SafeAreaView } from './src/tw';
 import { io, Socket } from 'socket.io-client';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -459,69 +451,78 @@ export default function App() {
   // --- VIEW RENDERING HELPERS ---
 
   const renderNavBar = () => (
-    <View style={styles.navBar}>
-      <TouchableOpacity onPress={() => setView('main')} style={styles.navItem}>
-        <MaterialIcons name="videocam" size={24} color={view === 'main' ? '#2196F3' : '#666'} />
-        <Text style={[styles.navText, view === 'main' && styles.navTextActive]}>Calls</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => setView('family')} style={styles.navItem}>
-        <MaterialIcons name="people" size={24} color={view === 'family' ? '#2196F3' : '#666'} />
-        <Text style={[styles.navText, view === 'family' && styles.navTextActive]}>Family</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => setView('notifications')} style={styles.navItem}>
+    <View className="flex-row justify-around py-3 bg-bg-card border-t border-glass-border">
+      <Pressable onPress={() => setView('main')} className="items-center justify-center">
+        <MaterialIcons name="videocam" size={24} color={view === 'main' ? '#9333EA' : '#666'} />
+        <Text className={`text-[10px] mt-1 ${view === 'main' ? 'text-purple-400 font-bold' : 'text-text-dim'}`}>Calls</Text>
+      </Pressable>
+      <Pressable onPress={() => setView('family')} className="items-center justify-center">
+        <MaterialIcons name="people" size={24} color={view === 'family' ? '#9333EA' : '#666'} />
+        <Text className={`text-[10px] mt-1 ${view === 'family' ? 'text-purple-400 font-bold' : 'text-text-dim'}`}>Family</Text>
+      </Pressable>
+      <Pressable onPress={() => setView('notifications')} className="items-center justify-center">
         <View>
-          <MaterialIcons name="notifications" size={24} color={view === 'notifications' ? '#2196F3' : '#666'} />
-          {notificationsBadge && <View style={styles.badgeDot} />}
+          <MaterialIcons name="notifications" size={24} color={view === 'notifications' ? '#9333EA' : '#666'} />
+          {notificationsBadge && <View className="absolute -right-0.5 -top-0.5 w-2 h-2 rounded-full bg-red-500" />}
         </View>
-        <Text style={[styles.navText, view === 'notifications' && styles.navTextActive]}>Inbox</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => setView('profile')} style={styles.navItem}>
-        <MaterialIcons name="person" size={24} color={view === 'profile' ? '#2196F3' : '#666'} />
-        <Text style={[styles.navText, view === 'profile' && styles.navTextActive]}>Profile</Text>
-      </TouchableOpacity>
+        <Text className={`text-[10px] mt-1 ${view === 'notifications' ? 'text-purple-400 font-bold' : 'text-text-dim'}`}>Inbox</Text>
+      </Pressable>
+      <Pressable onPress={() => setView('profile')} className="items-center justify-center">
+        <MaterialIcons name="person" size={24} color={view === 'profile' ? '#9333EA' : '#666'} />
+        <Text className={`text-[10px] mt-1 ${view === 'profile' ? 'text-purple-400 font-bold' : 'text-text-dim'}`}>Profile</Text>
+      </Pressable>
     </View>
   );
 
   if (view === 'auth') {
     return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.center}>
-          <Text style={styles.title}>MobileCall</Text>
+      <SafeAreaView className="flex-1 bg-bg-main">
+        <ScrollView contentContainerClassName="flex-grow justify-center items-center p-5">
+          <Text className="text-4xl font-bold mb-2 text-text-main text-center">MobileCall</Text>
           
           <TextInput
             placeholder="Server IP (e.g. 192.168.1.5)"
-            style={styles.input}
+            className="w-full p-4 bg-bg-card rounded-xl mb-3 border border-glass-border text-base text-text-main"
             value={serverIP}
             onChangeText={setServerIP}
             keyboardType="numeric"
+            placeholderTextColor="#666"
           />
 
-          <TouchableOpacity 
-            style={[styles.button, {backgroundColor: isScanning ? '#404040' : '#10B981', marginBottom: 20}]} 
+          <Pressable 
+            className={`p-4 rounded-xl items-center w-full mb-5 border border-glass-border ${isScanning ? 'bg-gray-800' : 'bg-emerald-600'}`}
             onPress={autoDiscoverServer}
             disabled={isScanning}
           >
-            <Text style={{color: '#fff', fontWeight: 'bold'}}>
+            <Text className="text-white font-bold">
               {isScanning ? `Scanning Subnet (${scanProgress}%)...` : 'Auto-Discover Server'}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <TextInput
-            style={styles.input}
+            className="w-full p-4 bg-bg-card rounded-xl mb-3 border border-glass-border text-base text-text-main"
             placeholder="Username"
             value={username}
             onChangeText={setUsername}
+            placeholderTextColor="#666"
           />
-          <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
+          <TextInput 
+            className="w-full p-4 bg-bg-card rounded-xl mb-3 border border-glass-border text-base text-text-main"
+            placeholder="Password" 
+            value={password} 
+            onChangeText={setPassword} 
+            secureTextEntry 
+            placeholderTextColor="#666"
+          />
           
-          <TouchableOpacity style={styles.button} onPress={handleAuth}>
-            <Text style={{ color: '#fff', fontWeight: 'bold' }}>{authMode.toUpperCase()}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
-            <Text style={{ color: '#C084FC', marginTop: 10 }}>
+          <Pressable className="p-4 rounded-xl bg-purple-600 items-center w-full my-2.5 border border-purple-700" onPress={handleAuth}>
+            <Text className="text-white font-bold">{authMode.toUpperCase()}</Text>
+          </Pressable>
+          <Pressable onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+            <Text className="text-purple-400 mt-2.5">
               {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Login"}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </ScrollView>
       </SafeAreaView>
     );
@@ -529,31 +530,31 @@ export default function App() {
 
   if (view === 'call') {
     return (
-      <SafeAreaView style={styles.callContainer}>
-        <View style={styles.center}>
-          <Text style={{ color: '#fff', fontSize: 24 }}>{isIncomingCall ? 'Incoming Call from' : 'Calling...'}</Text>
-          <Text style={{ color: '#fff', fontSize: 32, fontWeight: 'bold' }}>{callerName}</Text>
+      <SafeAreaView className="flex-1 bg-black">
+        <View className="flex-grow justify-center items-center p-5">
+          <Text className="text-white text-2xl">{isIncomingCall ? 'Incoming Call from' : 'Calling...'}</Text>
+          <Text className="text-white text-3xl font-bold">{callerName}</Text>
           {callStatus === 'ringing' || isIncomingCall ? (
-            <View style={{ flexDirection: 'row', marginTop: 40 }}>
+            <View className="flex-row mt-10 gap-5">
               {isIncomingCall && (
-                <TouchableOpacity onPress={acceptCall} style={[styles.roundButton, { backgroundColor: '#10B981' }]}>
+                <Pressable onPress={acceptCall} className="w-20 h-20 rounded-full justify-center items-center bg-emerald-500">
                   <MaterialIcons name="call" size={32} color="#fff" />
-                </TouchableOpacity>
+                </Pressable>
               )}
-              <TouchableOpacity onPress={declineCall} style={[styles.roundButton, { backgroundColor: '#EF4444' }]}>
+              <Pressable onPress={declineCall} className="w-20 h-20 rounded-full justify-center items-center bg-red-500">
                 <MaterialIcons name="call-end" size={32} color="#fff" />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           ) : (
-            <View style={{ flex: 1, width: '100%' }}>
+            <View className="flex-1 w-full relative">
               {Platform.OS === 'web' ? (
-                <video ref={remoteVideoRef} autoPlay playsInline style={{ ...styles.fullScreenVideo, objectFit: 'contain' } as any} />
+                <video ref={remoteVideoRef} autoPlay playsInline style={{ flex: 1, backgroundColor: '#000', objectFit: 'contain' } as any} />
               ) : (
-                remoteStream && <RTCView streamURL={remoteStream.toURL()} style={styles.fullScreenVideo} objectFit="contain" />
+                remoteStream && <RTCView streamURL={remoteStream.toURL()} style={{ flex: 1, backgroundColor: '#000' }} objectFit="contain" />
               )}
-              <TouchableOpacity onPress={() => endCall(true)} style={[styles.roundButton, { backgroundColor: '#EF4444', position: 'absolute', bottom: 40, alignSelf: 'center' }]}>
+              <Pressable onPress={() => endCall(true)} className="w-20 h-20 rounded-full justify-center items-center bg-red-500 absolute bottom-10 self-center">
                 <MaterialIcons name="call-end" size={32} color="#fff" />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           )}
         </View>
@@ -562,33 +563,33 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={{flex: 1}}>
+    <SafeAreaView className="flex-1 bg-bg-main">
+      <View className="flex-1">
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.welcome}>{view.toUpperCase()}</Text>
-          <TouchableOpacity onPress={() => { setAuthToken(null); setView('auth'); }}>
+        <View className="p-5 pt-10 bg-black flex-row justify-between items-center border-b border-gray-800">
+          <Text className="text-white text-xl font-bold tracking-widest">{view.toUpperCase()}</Text>
+          <Pressable onPress={() => { setAuthToken(null); setView('auth'); }}>
             <MaterialIcons name="logout" size={24} color="#fff" />
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
-        <ScrollView style={{flex: 1}}>
+        <ScrollView className="flex-1">
           {view === 'main' && (
-            <View style={{padding: 20}}>
-              <Text style={styles.sectionTitle}>Online Family Members</Text>
+            <View className="p-5">
+              <Text className="text-2xl font-bold mb-5 text-text-main">Online Family Members</Text>
               {users.length === 0 ? (
-                <Text style={{ textAlign: 'center', marginTop: 50, color: '#A3A3A3' }}>No one else is online in your family.</Text>
+                <Text className="text-center mt-12 text-gray-500">No one else is online in your family.</Text>
               ) : (
                 users.map((item) => (
-                  <View key={item.id} style={styles.userRow}>
-                    <Text style={{ fontSize: 18, fontWeight: '500' }}>{item.name}</Text>
-                    <View style={{ flexDirection: 'row' }}>
-                      <TouchableOpacity onPress={() => initiateCall(item.id, item.name, false)} style={[styles.callBtn, { backgroundColor: '#10B981' }]}>
+                  <View key={item.id} className="p-4 rounded-2xl bg-bg-card mb-3 flex-row justify-between items-center border border-gray-800">
+                    <Text className="text-lg font-medium text-text-main">{item.name}</Text>
+                    <View className="flex-row">
+                      <Pressable onPress={() => initiateCall(item.id, item.name, false)} className="p-3 rounded-xl ml-2.5 bg-emerald-500">
                         <MaterialIcons name="call" size={20} color="#fff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => initiateCall(item.id, item.name, true)} style={[styles.callBtn, { backgroundColor: '#9333EA' }]}>
+                      </Pressable>
+                      <Pressable onPress={() => initiateCall(item.id, item.name, true)} className="p-3 rounded-xl ml-2.5 bg-purple-600">
                         <MaterialIcons name="videocam" size={20} color="#fff" />
-                      </TouchableOpacity>
+                      </Pressable>
                     </View>
                   </View>
                 ))
@@ -597,70 +598,70 @@ export default function App() {
           )}
 
           {view === 'profile' && (
-            <View style={{padding: 20}}>
-              <View style={styles.profileHeader}>
-                <View style={styles.avatarLarge}>
-                  <Text style={styles.avatarText}>{(userProfile?.username || 'U')[0].toUpperCase()}</Text>
+            <View className="p-5">
+              <View className="items-center mb-7">
+                <View className="w-24 h-24 rounded-full bg-purple-600 justify-center items-center mb-4">
+                  <Text className="text-white text-4xl font-bold">{(userProfile?.username || 'U')[0].toUpperCase()}</Text>
                 </View>
-                <Text style={styles.profileName}>{userProfile?.username}</Text>
-                <Text style={{color: '#A3A3A3'}}>{userProfile?.role || 'No Role Set'}</Text>
+                <Text className="text-2xl font-bold text-white">{userProfile?.username}</Text>
+                <Text className="text-text-dim">{userProfile?.role || 'No Role Set'}</Text>
               </View>
 
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Update Profile</Text>
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Role</Text>
-                  <View style={styles.row}>
+              <View className="p-5 bg-bg-card rounded-2xl mb-5 border border-gray-800">
+                <Text className="text-lg font-bold mb-4 text-white">Update Profile</Text>
+                <View className="mb-5">
+                  <Text className="text-sm text-text-dim mb-2.5">Role</Text>
+                  <View className="flex-row gap-2.5">
                     {['caregiver', 'grandparent'].map(r => (
-                      <TouchableOpacity key={r} onPress={() => setUserProfile({...userProfile, role: r})} style={[styles.typeBtn, userProfile?.role === r && styles.typeBtnActive]}>
-                        <Text style={{color: userProfile?.role === r ? '#fff' : '#A3A3A3'}}>{r.charAt(0).toUpperCase() + r.slice(1)}</Text>
-                      </TouchableOpacity>
+                      <Pressable key={r} onPress={() => setUserProfile({...userProfile, role: r})} className={`flex-1 p-3 rounded-xl border items-center ${userProfile?.role === r ? 'bg-purple-600 border-purple-700' : 'bg-gray-900 border-gray-800'}`}>
+                        <Text className={userProfile?.role === r ? 'text-white' : 'text-gray-500'}>{r.charAt(0).toUpperCase() + r.slice(1)}</Text>
+                      </Pressable>
                     ))}
                   </View>
                 </View>
-                <TouchableOpacity style={styles.button} onPress={async () => {
+                <Pressable className="p-4 rounded-xl bg-purple-600 items-center border border-purple-700" onPress={async () => {
                    const baseUrl = getBaseUrl();
                    try {
                      await axios.post(`${baseUrl}/api/profile`, { role: userProfile.role, age: userProfile.age }, getAuthHeaders());
                      Alert.alert('Success', 'Profile updated');
                    } catch (e) { Alert.alert('Error', 'Update failed'); }
                 }}>
-                  <Text style={{color: '#fff'}}>Save Changes</Text>
-                </TouchableOpacity>
+                  <Text className="text-white font-bold">Save Changes</Text>
+                </Pressable>
               </View>
             </View>
           )}
 
           {view === 'family' && (
-            <View style={{padding: 20}}>
+            <View className="p-5">
               {!userProfile?.family_id ? (
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Join a Family</Text>
-                  <Text style={{marginBottom: 20, color: '#A3A3A3'}}>You are not in a family yet. Create one or wait for an invite.</Text>
-                  <TouchableOpacity style={styles.button} onPress={async () => {
+                <View className="p-5 bg-bg-card rounded-2xl mb-5 border border-gray-800">
+                  <Text className="text-lg font-bold mb-4 text-white">Join a Family</Text>
+                  <Text className="mb-5 text-text-dim">You are not in a family yet. Create one or wait for an invite.</Text>
+                  <Pressable className="p-4 rounded-xl bg-purple-600 items-center border border-purple-700" onPress={async () => {
                     const baseUrl = getBaseUrl();
                     try {
                       await axios.post(`${baseUrl}/api/family/create`, {}, getAuthHeaders());
                       fetchProfile();
                     } catch(e) {}
                   }}>
-                    <Text style={{color: '#fff'}}>Create New Family</Text>
-                  </TouchableOpacity>
+                    <Text className="text-white font-bold">Create New Family</Text>
+                  </Pressable>
                 </View>
               ) : (
                 <>
-                  <View style={[styles.row, {justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}]}>
-                    <Text style={styles.sectionTitle}>Family Members</Text>
-                    <TouchableOpacity onPress={pickImage} style={{backgroundColor: '#1E1B4B', padding: 8, borderRadius: 10}}>
-                      <MaterialIcons name="add-a-photo" size={24} color="#C084FC" />
-                    </TouchableOpacity>
+                  <View className="flex-row justify-between items-center mb-5">
+                    <Text className="text-2xl font-bold text-white">Family Members</Text>
+                    <Pressable onPress={pickImage} className="bg-purple-900/40 p-2 rounded-xl border border-purple-800/50">
+                      <MaterialIcons name="add-a-photo" size={24} color="#D8B4FE" />
+                    </Pressable>
                   </View>
                   {familyMembers.map((m, i) => (
-                    <View key={i} style={styles.memberRow}>
-                       <MaterialIcons name="person" size={24} color="#C084FC" />
-                       <View style={{marginLeft: 12, flex: 1}}>
-                         <Text style={{fontWeight: 'bold', color: '#FFFFFF'}}>{m.username}</Text>
-                         <Text style={{fontSize: 12, color: '#A3A3A3'}}>{m.role}</Text>
+                    <View key={i} className="flex-row items-center p-4 bg-bg-card rounded-2xl mb-2.5 border border-gray-800">
+                       <MaterialIcons name="person" size={24} color="#D8B4FE" />
+                       <View className="ml-3 flex-1">
+                         <Text className="font-bold text-white">{m.username}</Text>
+                         <Text className="text-xs text-text-dim capitalize">{m.role}</Text>
                        </View>
                     </View>
                   ))}
@@ -670,31 +671,31 @@ export default function App() {
           )}
 
           {view === 'notifications' && (
-            <View style={{padding: 20}}>
-              <Text style={styles.sectionTitle}>Invitations</Text>
+            <View className="p-5">
+              <Text className="text-2xl font-bold mb-5 text-white">Invitations</Text>
               {pendingInvitations.length === 0 ? (
-                <Text style={{textAlign: 'center', marginTop: 40, color: '#A3A3A3'}}>No new invitations.</Text>
+                <Text className="text-center mt-10 text-gray-500">No new invitations.</Text>
               ) : (
                 pendingInvitations.map((inv, i) => (
-                  <View key={i} style={styles.card}>
-                    <Text style={{fontWeight: 'bold', color: '#FFFFFF'}}>Family Invite</Text>
-                    <Text style={{marginVertical: 8, color: '#A3A3A3'}}>You have been invited to join a family.</Text>
-                    <View style={styles.row}>
-                      <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10B981'}]} onPress={async () => {
+                  <View key={i} className="p-5 bg-bg-card rounded-2xl mb-5 border border-gray-800">
+                    <Text className="font-bold text-white">Family Invite</Text>
+                    <Text className="my-2 text-text-dim">You have been invited to join a family.</Text>
+                    <View className="flex-row gap-2.5">
+                      <Pressable className="flex-1 p-3 rounded-xl bg-emerald-500 items-center justify-center" onPress={async () => {
                         const baseUrl = getBaseUrl();
                         await axios.post(`${baseUrl}/api/family/accept/${inv.id}`, {}, getAuthHeaders());
                         fetchNotifications();
                         fetchProfile();
                       }}>
-                        <Text style={{color: '#fff'}}>Accept</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#EF4444'}]} onPress={async () => {
+                        <Text className="text-white font-bold">Accept</Text>
+                      </Pressable>
+                      <Pressable className="flex-1 p-3 rounded-xl bg-red-500 items-center justify-center" onPress={async () => {
                         const baseUrl = getBaseUrl();
                         await axios.post(`${baseUrl}/api/family/decline/${inv.id}`, {}, getAuthHeaders());
                         fetchNotifications();
                       }}>
-                        <Text style={{color: '#fff'}}>Decline</Text>
-                      </TouchableOpacity>
+                        <Text className="text-white font-bold">Decline</Text>
+                      </Pressable>
                     </View>
                   </View>
                 ))
@@ -709,36 +710,3 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000' },
-  center: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  title: { fontSize: 36, fontWeight: 'bold', marginBottom: 10, color: '#FFFFFF', textAlign: 'center' },
-  input: { width: '100%', padding: 16, backgroundColor: '#171717', borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#404040', fontSize: 16, color: '#FFFFFF' },
-  button: { padding: 16, borderRadius: 12, backgroundColor: '#9333EA', alignItems: 'center', width: '100%', marginVertical: 10, borderWidth: 1, borderColor: '#7E22CE' },
-  header: { padding: 20, paddingTop: 40, backgroundColor: '#000000', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#262626' },
-  welcome: { color: '#FFFFFF', fontSize: 20, fontWeight: 'bold', letterSpacing: 0.5 },
-  sectionTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 20, color: '#FFFFFF' },
-  userRow: { padding: 16, borderRadius: 16, backgroundColor: '#171717', marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#262626' },
-  callBtn: { padding: 12, borderRadius: 12, marginLeft: 10 },
-  callContainer: { flex: 1, backgroundColor: '#000000' },
-  fullScreenVideo: { flex: 1, backgroundColor: '#000000' },
-  navBar: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: '#0A0A0A', borderTopWidth: 1, borderTopColor: '#262626' },
-  navItem: { alignItems: 'center', justifyContent: 'center' },
-  navText: { fontSize: 10, marginTop: 4, color: '#A3A3A3' },
-  navTextActive: { color: '#C084FC', fontWeight: 'bold' },
-  badgeDot: { position: 'absolute', right: -2, top: -2, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  profileHeader: { alignItems: 'center', marginBottom: 30 },
-  avatarLarge: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#9333EA', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-  avatarText: { color: '#FFFFFF', fontSize: 40, fontWeight: 'bold' },
-  profileName: { fontSize: 24, fontWeight: 'bold', color: '#FFFFFF' },
-  card: { padding: 20, backgroundColor: '#171717', borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#262626' },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#FFFFFF' },
-  formGroup: { marginBottom: 20 },
-  label: { fontSize: 14, color: '#A3A3A3', marginBottom: 10 },
-  row: { flexDirection: 'row', gap: 10 },
-  typeBtn: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#404040', alignItems: 'center', backgroundColor: '#0A0A0A' },
-  typeBtnActive: { backgroundColor: '#9333EA', borderColor: '#7E22CE' },
-  memberRow: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#171717', borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: '#262626' },
-  actionBtn: { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' },
-  roundButton: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginHorizontal: 20 },
-});
