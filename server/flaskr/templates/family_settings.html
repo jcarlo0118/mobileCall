@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Family Settings - MobileCall</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
 </head>
 <body>
     <div class="box glass" style="max-width: 600px;">
@@ -32,7 +32,7 @@
         </div>
 
         <div style="margin-top: 40px; display: flex; gap: 12px;">
-            <a href="/user/{{ session['logged_in_user'] }}" class="btn-outline" style="flex: 1;">Back to Profile</a>
+            <a href="/user/{{ logged_in_user }}" class="btn-outline" style="flex: 1;">Back to Profile</a>
             <a href="/notifications" class="btn-outline" style="flex: 1;">View Inbox</a>
         </div>
     </div>

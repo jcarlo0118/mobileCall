@@ -1,149 +1,157 @@
 import os
 import sys
-
-# Add the parent directory to sys.path to resolve imports when running as a script
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+import asyncio
 import sqlite3
 import bcrypt
-
-from flask import Flask
-from markupsafe import escape
-from flask import url_for
-from flask import request,jsonify,redirect
-from flask import render_template
 import jwt
 import datetime
 from functools import wraps
+from typing import Optional
 
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from flask_cors import CORS
+import uvicorn
+import aiofiles
+from fastapi import FastAPI, Request, HTTPException, Depends, Form, File, UploadFile
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+import socketio
 from werkzeug.utils import secure_filename
-from flask import session
+
+# Add the parent directory to sys.path to resolve imports when running as a script
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from setupDB import add_new_user, get_user, update_profile_image, get_connection
 from flaskr.services.eligibility_service import EligibilityService
 from flaskr.services.image_service import ImageProcessingService
 
-# Note: Eventlet/Gevent monkey patching is disabled to ensure compatibility 
-# with Python 3.13 + Windows internals. The server will run in 'threading' mode.
+# --- Configuration ---
+SECRET_KEY = 'super_secret_key_change_this_later'
+UPLOAD_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), 'static', 'uploads'))
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'super_secret_key_change_this_later'
-CORS(app)
+# --- Socket.IO Setup ---
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    cors_allowed_origins='*',
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25
+)
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'message': 'Token is missing!'}), 401
-        try:
-            if token.startswith('Bearer '):
-                token = token[7:]
-            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            current_user = get_user(data['user'])
-            if not current_user:
-                return jsonify({'message': 'User not found!'}), 401
-            print(f"DEBUG: Token User ID: {current_user['id']} for username {data['user']}")
-        except Exception as e:
-            return jsonify({'message': 'Token is invalid!', 'error': str(e)}), 401
-        return f(current_user, *args, **kwargs)
-    return decorated
+# --- FastAPI App Setup ---
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Templates
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+
+# --- Services ---
+image_processor = ImageProcessingService()
+# Note: we keep these as dicts in memory as before, though for production 
+# shared state between processes would need Redis/DB.
+connected_users = {} # {sid: {"name": username, "family_id": family_id}}
+
+# --- Helpers ---
+
+async def get_current_user(request: Request):
+    token = request.headers.get('Authorization')
+    if not token:
+        # Check cookies for template-based views
+        token = request.cookies.get('token')
+        
+    if not token:
+        raise HTTPException(status_code=401, detail="Token is missing!")
+        
+    try:
+        if token.startswith('Bearer '):
+            token = token[7:]
+        data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        
+        # Use run_in_executor for blocking DB calls
+        loop = asyncio.get_event_loop()
+        current_user = await loop.run_in_executor(None, get_user, data['user'])
+        
+        if not current_user:
+            raise HTTPException(status_code=401, detail="User not found!")
+        return current_user
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token is invalid! {str(e)}")
 
 def generate_token(username):
     payload = {
         'user': username,
         'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=24)
     }
-    return jwt.encode(payload, app.config['SECRET_KEY'], algorithm="HS256")
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
-# Configure upload folder
-UPLOAD_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), 'static', 'uploads'))
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# --- Web Routes ---
 
-# Explicitly using async_mode='threading' for compatibility with Python 3.13
-# Optimized for Cloudflare Tunneling (Higher ping timeout, allow_upgrades for WebSockets)
-socketio = SocketIO(
-    app, 
-    cors_allowed_origins="*", 
-    async_mode='threading', 
-    manage_session=False, 
-    logger=True, 
-    engineio_logger=True,
-    ping_timeout=60,
-    ping_interval=25,
-    allow_upgrades=True
-)
+@app.get("/", response_class=HTMLResponse)
+async def homepage(request: Request):
+    return templates.TemplateResponse(request, "index.html", {"logged_in_user": request.cookies.get("logged_in_user")})
 
-users = {} # {socket_id: username}
-image_processor = ImageProcessingService()
+@app.get("/api/ping")
+async def ping():
+    return {"status": "successful", "service": "mobile-call-server-fastapi"}
 
-@app.route("/")
-def homepage():
-	return render_template("index.html")
+@app.get("/register", response_class=HTMLResponse)
+async def register_view(request: Request):
+    return templates.TemplateResponse(request, "auth/register.html", {"logged_in_user": request.cookies.get("logged_in_user")})
 
-@app.route("/api/ping", methods=['GET'])
-def ping():
-    return jsonify({"status": "successful", "service": "mobile-call-server"})
-
-@app.route("/register", methods = ['GET', 'POST'])
-def register():
-    if request.method == 'GET':
-        return render_template("auth/register.html")
-
-    data = request.get_json()
-    if not data:
-        return jsonify({"status": "unsuccessful", "message": "Invalid JSON data"}), 400
-
+@app.post("/register")
+async def register(request: Request):
+    data = await request.json()
     uName = data.get('username')
     passW = data.get('password')
 
     if not uName or not passW:
-        return jsonify({"status": "unsuccessful", "message": "Username and password required"}), 400
+        return JSONResponse({"status": "unsuccessful", "message": "Username and password required"}, status_code=400)
 
-    # Default values for simplified registration (setup later in profile)
-    age = None
-    sub_status = 'basic'
-    role = 'standard'
-    family_id = None
-    is_eligible = 1
+    loop = asyncio.get_event_loop()
+    # Default values for simplified registration
+    is_successful = await loop.run_in_executor(None, add_new_user, uName, passW, None, 'basic', 1, 'standard', None)
 
-    is_successful = add_new_user(uName, passW, age, sub_status, is_eligible, role, family_id)
-
-    if is_successful == True:
-        session['logged_in_user'] = uName
+    if is_successful:
         token = generate_token(uName)
-        return jsonify({
+        response = JSONResponse({
             "status": "successful", 
             "message": f"Registration successful for {uName}",
             "token": token
         })
+        response.set_cookie(key="token", value=token, httponly=False)
+        response.set_cookie(key="logged_in_user", value=uName, httponly=False)
+        return response
     else:
-        return jsonify({"status": "unsuccessful", "message": f"Registration failed, username {uName} may be taken"}), 400
+        return JSONResponse({"status": "unsuccessful", "message": f"Registration failed, username {uName} may be taken"}, status_code=400)
 
-@app.route('/login', methods = ['GET', 'POST'])
-def login():
-    if request.method == 'GET':
-        return render_template("auth/login.html")
+@app.get("/login", response_class=HTMLResponse)
+async def login_view(request: Request):
+    return templates.TemplateResponse(request, "auth/login.html", {"logged_in_user": request.cookies.get("logged_in_user")})
 
-    data = request.get_json()
-    if not data:
-        return jsonify({"status": "unsuccessful", "message": "Invalid JSON data"}), 400
-
+@app.post("/login")
+async def login(request: Request):
+    data = await request.json()
     uName = data.get('username')
     passW = data.get('password')
 
-    user_row = get_user(uName)
+    loop = asyncio.get_event_loop()
+    user_row = await loop.run_in_executor(None, get_user, uName)
 
     if user_row is None:
-        return jsonify({"status": "unsuccessful", "message": "Login unsuccessful, username not found"}), 404
+        return JSONResponse({"status": "unsuccessful", "message": "Login unsuccessful, username not found"}, status_code=404)
     
     if bcrypt.checkpw(passW.encode('utf-8'), user_row['password']):
-        session['logged_in_user'] = uName
         token = generate_token(uName)
-        return jsonify({
+        response = JSONResponse({
             "status": "successful", 
             "message": "Login successful",
             "token": token,
@@ -155,417 +163,341 @@ def login():
                 "is_voip_eligible": bool(user_row['is_voip_eligible'])
             }
         })
+        response.set_cookie(key="token", value=token, httponly=False)
+        response.set_cookie(key="logged_in_user", value=uName, httponly=False)
+        return response
     else:
-        return jsonify({"status": "unsuccessful", "message": "Login unsuccessful, password not correct"}), 401
+        return JSONResponse({"status": "unsuccessful", "message": "Login unsuccessful, password not correct"}, status_code=401)
 
-# --- Family Management Endpoints ---
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/")
+    response.delete_cookie("token")
+    response.delete_cookie("logged_in_user")
+    return response
 
-@app.route("/api/family/create", methods=['POST'])
-@token_required
-def create_family(current_user):
-    data = request.get_json()
+# --- Family API ---
+
+@app.post("/api/family/create")
+async def create_family(request: Request, current_user = Depends(get_current_user)):
+    data = await request.json()
     family_name = data.get('name')
     if not family_name:
-        return jsonify({"status": "unsuccessful", "message": "Family name required"}), 400
+        return JSONResponse({"status": "unsuccessful", "message": "Family name required"}, status_code=400)
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    loop = asyncio.get_event_loop()
+    def _create():
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('INSERT INTO families (name, admin_id) VALUES (?, ?)', (family_name, current_user['id']))
+            family_id = cursor.lastrowid
+            cursor.execute('UPDATE users SET family_id = ?, role = ? WHERE id = ?', (family_id, 'admin', current_user['id']))
+            conn.commit()
+            return family_id
+        finally:
+            conn.close()
+
     try:
-        cursor.execute('INSERT INTO families (name, admin_id) VALUES (?, ?)', (family_name, current_user['id']))
-        family_id = cursor.lastrowid
-        cursor.execute('UPDATE users SET family_id = ?, role = ? WHERE id = ?', (family_id, 'admin', current_user['id']))
-        conn.commit()
-        return jsonify({"status": "successful", "family_id": family_id, "message": f"Family '{family_name}' created"})
+        family_id = await loop.run_in_executor(None, _create)
+        return {"status": "successful", "family_id": family_id, "message": f"Family '{family_name}' created"}
     except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
-    finally:
-        conn.close()
+        return JSONResponse({"status": "unsuccessful", "message": str(e)}, status_code=500)
 
-@app.route("/api/family/add-member", methods=['POST'])
-@token_required
-def add_family_member(current_user):
-    # Only admin can add members
-    if current_user['role'] != 'admin':
-        return jsonify({"status": "unsuccessful", "message": "Only admins can add members"}), 403
-
-    data = request.get_json()
-    member_username = data.get('username')
-    role = data.get('role', 'standard')
-
-    if not member_username:
-        return jsonify({"status": "unsuccessful", "message": "Username required"}), 400
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute('UPDATE users SET family_id = ?, role = ? WHERE username = ?', (current_user['family_id'], role, member_username))
-        if cursor.rowcount == 0:
-            return jsonify({"status": "unsuccessful", "message": "User not found"}), 404
-        conn.commit()
-        return jsonify({"status": "successful", "message": f"User {member_username} added to family as {role}"})
-    except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
-    finally:
-        conn.close()
-
-@app.route("/api/family/members", methods=['GET'])
-@token_required
-def get_family_members(current_user):
+@app.get("/api/family/members")
+async def get_family_members(current_user = Depends(get_current_user)):
     family_id = current_user['family_id']
     if not family_id:
-        return jsonify({"status": "successful", "members": []})
+        return {"status": "successful", "members": []}
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, username, role, profile_image FROM users WHERE family_id = ?', (family_id,))
-    rows = cursor.fetchall()
-    members = []
-    for r in rows:
-        members.append({
-            "id": r[0],
-            "username": r[1],
-            "role": r[2],
-            "profile_image": r[3]
-        })
-    conn.close()
-    return jsonify({"status": "successful", "members": members})
+    loop = asyncio.get_event_loop()
+    def _get():
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username, role, profile_image FROM users WHERE family_id = ?', (family_id,))
+        rows = cursor.fetchall()
+        members = [{"id": r[0], "username": r[1], "role": r[2], "profile_image": r[3]} for r in rows]
+        conn.close()
+        return members
 
-@app.route("/api/family/invite", methods=['POST'])
-@token_required
-def invite_member(current_user):
-    data = request.get_json()
+    members = await loop.run_in_executor(None, _get)
+    return {"status": "successful", "members": members}
+
+@app.post("/api/family/invite")
+async def invite_member(request: Request, current_user = Depends(get_current_user)):
+    data = await request.json()
     target_username = data.get('username')
     
-    print(f"DEBUG: FULL current_user in invite_member: {current_user}")
     if not current_user['family_id']:
-        return jsonify({"status": "unsuccessful", "message": "You must create a family before inviting members"}), 400
+        return JSONResponse({"status": "unsuccessful", "message": "You must create a family before inviting members"}, status_code=400)
 
     if not target_username:
-        return jsonify({"status": "unsuccessful", "message": "Username required"}), 400
+        return JSONResponse({"status": "unsuccessful", "message": "Username required"}, status_code=400)
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        # 1. Find target user
-        cursor.execute('SELECT id, family_id FROM users WHERE username = ?', (target_username,))
-        target_user = cursor.fetchone()
-        if not target_user:
-            return jsonify({"status": "unsuccessful", "message": "User not found"}), 404
-        
-        target_id, target_family_id = target_user
-        if target_family_id:
-            return jsonify({"status": "unsuccessful", "message": "User is already in a family"}), 400
+    loop = asyncio.get_event_loop()
+    def _invite():
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT id, family_id FROM users WHERE username = ?', (target_username,))
+            target_user = cursor.fetchone()
+            if not target_user: return "NOT_FOUND"
+            
+            target_id, target_family_id = target_user
+            if target_family_id: return "ALREADY_IN_FAMILY"
 
-        # 2. Check if already invited
-        cursor.execute('SELECT id FROM invitations WHERE family_id = ? AND receiver_id = ? AND status = "pending"', 
-                       (current_user['family_id'], target_id))
-        if cursor.fetchone():
-            return jsonify({"status": "unsuccessful", "message": "Invitation already pending"}), 400
+            cursor.execute('SELECT id FROM invitations WHERE family_id = ? AND receiver_id = ? AND status = "pending"', 
+                           (current_user['family_id'], target_id))
+            if cursor.fetchone(): return "ALREADY_PENDING"
 
-        # 3. Create invitation
-        cursor.execute('INSERT INTO invitations (family_id, sender_id, receiver_id) VALUES (?, ?, ?)',
-                       (current_user['family_id'], current_user['id'], target_id))
-        conn.commit()
-        return jsonify({"status": "successful", "message": f"Invitation sent to {target_username}"})
-    except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
-    finally:
+            cursor.execute('INSERT INTO invitations (family_id, sender_id, receiver_id) VALUES (?, ?, ?)',
+                           (current_user['family_id'], current_user['id'], target_id))
+            conn.commit()
+            return "SUCCESS"
+        finally:
+            conn.close()
+
+    res = await loop.run_in_executor(None, _invite)
+    if res == "SUCCESS": return {"status": "successful", "message": f"Invitation sent to {target_username}"}
+    if res == "NOT_FOUND": return JSONResponse({"status": "unsuccessful", "message": "User not found"}, status_code=404)
+    return JSONResponse({"status": "unsuccessful", "message": res}, status_code=400)
+
+@app.get("/api/notifications")
+async def get_notifications(current_user = Depends(get_current_user)):
+    loop = asyncio.get_event_loop()
+    def _get():
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT i.id, f.name, u.username, i.status, i.created_at
+            FROM invitations i
+            JOIN families f ON i.family_id = f.id
+            JOIN users u ON i.sender_id = u.id
+            WHERE i.receiver_id = ? AND i.status = "pending"
+        ''', (current_user['id'],))
+        invites = [{"id": row[0], "family_name": row[1], "sender_name": row[2], "status": row[3], "date": row[4]} for row in cursor.fetchall()]
         conn.close()
+        return invites
 
-@app.route("/api/notifications", methods=['GET'])
-@token_required
-def get_notifications(current_user):
-    conn = get_connection()
-    cursor = conn.cursor()
-    # Join with families and senders to get names
-    print(f"DEBUG: Getting notifications for receiver_id={current_user['id']}")
-    cursor.execute('''
-        SELECT i.id, f.name, u.username, i.status, i.created_at
-        FROM invitations i
-        JOIN families f ON i.family_id = f.id
-        JOIN users u ON i.sender_id = u.id
-        WHERE i.receiver_id = ? AND i.status = "pending"
-    ''', (current_user['id'],))
-    invites = []
-    for row in cursor.fetchall():
-        invites.append({
-            "id": row[0],
-            "family_name": row[1],
-            "sender_name": row[2],
-            "status": row[3],
-            "date": row[4]
-        })
-    conn.close()
-    return jsonify({"status": "successful", "notifications": invites})
+    invites = await loop.run_in_executor(None, _get)
+    return {"status": "successful", "notifications": invites}
 
-@app.route("/api/notifications/respond", methods=['POST'])
-@token_required
-def respond_notification(current_user):
-    data = request.get_json()
+@app.post("/api/notifications/respond")
+async def respond_notification(request: Request, current_user = Depends(get_current_user)):
+    data = await request.json()
     invite_id = data.get('invite_id')
-    response = data.get('response') # 'accepted' or 'rejected'
+    response = data.get('response')
 
     if response not in ['accepted', 'rejected']:
-        return jsonify({"status": "unsuccessful", "message": "Invalid response"}), 400
+        return JSONResponse({"status": "unsuccessful", "message": "Invalid response"}, status_code=400)
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        # Verify invitation belongs to user
-        cursor.execute('SELECT family_id FROM invitations WHERE id = ? AND receiver_id = ?', (invite_id, current_user['id']))
-        invite = cursor.fetchone()
-        if not invite:
-            return jsonify({"status": "unsuccessful", "message": "Invitation not found"}), 404
+    loop = asyncio.get_event_loop()
+    def _respond():
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT family_id FROM invitations WHERE id = ? AND receiver_id = ?', (invite_id, current_user['id']))
+            invite = cursor.fetchone()
+            if not invite: return False
+            family_id = invite[0]
+            cursor.execute('UPDATE invitations SET status = ? WHERE id = ?', (response, invite_id))
+            if response == 'accepted':
+                cursor.execute('UPDATE users SET family_id = ? WHERE id = ?', (family_id, current_user['id']))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
 
-        family_id = invite[0]
-        
-        # Update invitation
-        cursor.execute('UPDATE invitations SET status = ? WHERE id = ?', (response, invite_id))
-        
-        if response == 'accepted':
-            # Join family
-            cursor.execute('UPDATE users SET family_id = ? WHERE id = ?', (family_id, current_user['id']))
-            
-        conn.commit()
-        return jsonify({"status": "successful", "message": f"Invitation {response}"})
-    except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
-    finally:
-        conn.close()
+    success = await loop.run_in_executor(None, _respond)
+    if success: return {"status": "successful", "message": f"Invitation {response}"}
+    return JSONResponse({"status": "unsuccessful", "message": "Invitation not found"}, status_code=404)
 
-@app.route("/api/profile", methods=['GET', 'POST'])
-@token_required
-def profile_api(current_user):
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        if request.method == 'GET':
-            cursor.execute('SELECT id, username, role, family_id, is_voip_eligible, age FROM users WHERE id = ?', (current_user['id'],))
-            row = cursor.fetchone()
-            if row:
-                user_data = {
-                    "id": row[0],
-                    "username": row[1],
-                    "role": row[2],
-                    "family_id": row[3],
-                    "is_voip_eligible": bool(row[4]),
-                    "age": row[5]
-                }
-                return jsonify({"status": "successful", "user": user_data})
-            return jsonify({"status": "unsuccessful", "message": "User not found"}), 404
-        
-        # POST logic
-        data = request.get_json()
-        role = data.get('role')
-        age = data.get('age')
+# --- Profile and Image API ---
 
-        if role:
-            cursor.execute('UPDATE users SET role = ? WHERE id = ?', (role, current_user['id']))
-        if age:
-            cursor.execute('UPDATE users SET age = ? WHERE id = ?', (age, current_user['id']))
-        conn.commit()
-        return jsonify({"status": "successful", "message": "Profile updated"})
-    except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
-    finally:
-        conn.close()
+@app.get("/api/profile")
+async def get_profile(current_user = Depends(get_current_user)):
+    return {"status": "successful", "user": current_user}
 
-@app.route("/upload-image", methods=['POST'])
-def upload_image():
-    if 'image' not in request.files:
-        return jsonify({"status": "unsuccessful", "message": "No image part"}), 400
+@app.post("/api/profile/update")
+async def update_profile(request: Request, current_user = Depends(get_current_user)):
+    data = await request.json()
+    role = data.get('role')
+    age = data.get('age')
+    loop = asyncio.get_event_loop()
+    def _update():
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            if role: cursor.execute('UPDATE users SET role = ? WHERE id = ?', (role, current_user['id']))
+            if age: cursor.execute('UPDATE users SET age = ? WHERE id = ?', (age, current_user['id']))
+            conn.commit()
+        finally:
+            conn.close()
+    await loop.run_in_executor(None, _update)
+    return {"status": "successful", "message": "Profile updated"}
+
+@app.post("/upload-image")
+async def upload_image(image: UploadFile = File(...), username: str = Form(...)):
+    filename = secure_filename(f"{username}_group_{image.filename}")
+    temp_path = os.path.join(UPLOAD_FOLDER, filename)
     
-    file = request.files['image']
-    username = request.form.get('username')
-    
-    if file.filename == '' or not username:
-        return jsonify({"status": "unsuccessful", "message": "No selected file or username"}), 400
+    import aiofiles
+    async with aiofiles.open(temp_path, "wb") as buffer:
+        await buffer.write(await image.read())
 
-    filename = secure_filename(f"{username}_group_{file.filename}")
-    temp_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(temp_path)
-
+    loop = asyncio.get_event_loop()
     try:
-        faces, img_shape = image_processor.detect_faces(temp_path)
-        return jsonify({
+        faces, img_shape = await loop.run_in_executor(None, image_processor.detect_faces, temp_path)
+        return {
             "status": "successful",
             "message": f"Detected {len(faces)} faces",
             "faces": faces,
             "image_id": filename
-        })
+        }
     except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
+        return JSONResponse({"status": "unsuccessful", "message": str(e)}, status_code=500)
 
-@app.route("/finalize-crop", methods=['POST'])
-def finalize_crop():
-    data = request.get_json()
+@app.post("/finalize-crop")
+async def finalize_crop(request: Request):
+    data = await request.json()
     username = data.get('username')
     image_id = data.get('image_id')
-    face_coords = data.get('face') # {x, y, w, h}
+    face = data.get('face')
 
-    if not username or not image_id or not face_coords:
-        return jsonify({"status": "unsuccessful", "message": "Missing data"}), 400
+    if not username or not image_id or not face:
+        return JSONResponse({"status": "unsuccessful", "message": "Missing data"}, status_code=400)
 
-    input_path = os.path.join(app.config['UPLOAD_FOLDER'], image_id)
+    input_path = os.path.join(UPLOAD_FOLDER, image_id)
     output_filename = f"{username}_profile.jpg"
-    output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+    output_path = os.path.join(UPLOAD_FOLDER, output_filename)
 
+    loop = asyncio.get_event_loop()
     try:
-        image_processor.crop_face(
-            input_path, 
-            face_coords['x'], 
-            face_coords['y'], 
-            face_coords['w'], 
-            face_coords['h'], 
-            output_path
-        )
-        # Update database
-        update_profile_image(username, f"/static/uploads/{output_filename}")
-        return jsonify({
+        await loop.run_in_executor(None, image_processor.crop_face, input_path, face['x'], face['y'], face['w'], face['h'], output_path)
+        await loop.run_in_executor(None, update_profile_image, username, f"/static/uploads/{output_filename}")
+        return {
             "status": "successful",
             "message": "Profile image updated",
             "profile_image": f"/static/uploads/{output_filename}"
-        })
+        }
     except Exception as e:
-        return jsonify({"status": "unsuccessful", "message": str(e)}), 500
+        return JSONResponse({"status": "unsuccessful", "message": str(e)}, status_code=500)
 
-@app.route("/user/<username>")
-def profile(username):
-    #check if the cookie exists and matches the URL
-    if 'logged_in_user' not in session or session['logged_in_user'] != username:
-        return redirect(url_for('login')) # Safer than direct text
+# --- Template Pages ---
 
-    user_data = get_user(username)
-    return render_template("profile.html", user=user_data)
+@app.get("/user/{username}", response_class=HTMLResponse)
+async def user_profile_view(request: Request, username: str):
+    logged_user = request.cookies.get("logged_in_user")
+    if logged_user != username:
+        return RedirectResponse(url="/login")
+    
+    loop = asyncio.get_event_loop()
+    user_data = await loop.run_in_executor(None, get_user, username)
+    return templates.TemplateResponse(request, "profile.html", {"user": user_data, "logged_in_user": logged_user})
 
-@app.route("/family/create")
-def create_family_view():
-    if 'logged_in_user' not in session:
-        return redirect(url_for('login'))
-    return render_template("create_family.html")
+@app.get("/family/create", response_class=HTMLResponse)
+async def create_family_view(request: Request):
+    logged_user = request.cookies.get("logged_in_user")
+    if not logged_user: return RedirectResponse(url="/login")
+    return templates.TemplateResponse(request, "create_family.html", {"logged_in_user": logged_user})
 
-@app.route("/family/settings")
-def family_settings_view():
-    if 'logged_in_user' not in session:
-        return redirect(url_for('login'))
-    user_data = get_user(session['logged_in_user'])
-    if not user_data['family_id']: # No family_id
-        return redirect(url_for('create_family_view'))
-    return render_template("family_settings.html", user=user_data)
+@app.get("/family/settings", response_class=HTMLResponse)
+async def family_settings_view(request: Request):
+    logged_user = request.cookies.get("logged_in_user")
+    if not logged_user: return RedirectResponse(url="/login")
+    loop = asyncio.get_event_loop()
+    user_data = await loop.run_in_executor(None, get_user, logged_user)
+    if not user_data['family_id']: return RedirectResponse(url="/family/create")
+    return templates.TemplateResponse(request, "family_settings.html", {"user": user_data, "logged_in_user": logged_user})
 
-@app.route("/notifications")
-def notifications_view():
-    if 'logged_in_user' not in session:
-        return redirect(url_for('login'))
-    return render_template("notifications.html")
+@app.get("/notifications", response_class=HTMLResponse)
+async def notifications_page(request: Request):
+    logged_user = request.cookies.get("logged_in_user")
+    if not logged_user: return RedirectResponse(url="/login")
+    return templates.TemplateResponse(request, "notifications.html", {"logged_in_user": logged_user})
 
-@app.route("/logout")
-def logout():
-    session.pop('logged_in_user', None)
-    return redirect(url_for('homepage'))
+# --- Socket.IO Event Handlers ---
 
-@socketio.on('connect')
-def handle_connect():
-    print(f"[CONNECT] ID: {request.sid} | IP: {request.remote_addr}")
+@sio.on('connect')
+async def handle_connect(sid, environ):
+    print(f"[CONNECT] ID: {sid}")
 
-@socketio.on('join')
-def handle_join(data):
-    # data can be a token or just the family_id if already authenticated
+@sio.on('join')
+async def handle_join(sid, data):
     token = data.get('token')
-    if not token:
-        print("[JOIN] Failed: No token provided")
-        return
+    if not token: return
     try:
-        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         username = decoded['user']
-        user_row = get_user(username)
-        if not user_row:
-            print(f"[JOIN] Failed: User {username} not found in DB")
-            return
-        
-        family_id = user_row['family_id']
-        if not family_id:
-            print(f"[JOIN] Failed: User {username} has no family_id")
-            return
+        loop = asyncio.get_event_loop()
+        user_row = await loop.run_in_executor(None, get_user, username)
+        if not user_row or not user_row['family_id']: return
 
+        family_id = user_row['family_id']
         room = f"family_{family_id}"
-        join_room(room)
-        users[request.sid] = {"name": username, "family_id": family_id}
+        await sio.enter_room(sid, room)
+        connected_users[sid] = {"name": username, "family_id": family_id}
         
-        print(f"[JOIN] {username} (ID: {request.sid}) joined room {room}")
+        print(f"[JOIN] {username} joined room {room}")
         
-        # Emit updated user list to the room
-        family_members = [{"id": sid, "name": u["name"]} for sid, u in users.items() if u["family_id"] == family_id]
-        emit('user-list', family_members, to=room)
+        family_members = [{"id": s, "name": u["name"]} for s, u in connected_users.items() if u["family_id"] == family_id]
+        await sio.emit('user-list', family_members, room=room)
     except Exception as e:
         print(f"Join error: {e}")
 
-@socketio.on('request-user-list')
-def handle_request_user_list(data):
-    user_info = users.get(request.sid)
+@sio.on('request-user-list')
+async def handle_request_user_list(sid, data):
+    user_info = connected_users.get(sid)
     if user_info:
         family_id = user_info['family_id']
-        family_members = [{"id": sid, "name": u["name"]} for sid, u in users.items() if u["family_id"] == family_id]
-        emit('user-list', family_members)
+        family_members = [{"id": s, "name": u["name"]} for s, u in connected_users.items() if u["family_id"] == family_id]
+        await sio.emit('user-list', family_members, to=sid)
 
-@socketio.on('offer')
-def handle_offer(data):
+@sio.on('offer')
+async def handle_offer(sid, data):
     target_to = data.get('to')
-    user_info = users.get(request.sid)
+    user_info = connected_users.get(sid)
     sender_name = user_info['name'] if user_info else "Unknown"
     
-    print(f"[OFFER] From: {sender_name} ({request.sid}) -> To: {target_to}")
-    
-    if target_to not in users:
-        print(f"[OFFER] Error: Target {target_to} not in active users list")
-        print(f"Current connected IDs: {list(users.keys())}")
-        return
-
-    emit('offer', {
-        'from': request.sid,
+    await sio.emit('offer', {
+        'from': sid,
         'fromName': sender_name,
         'offer': data.get('offer'),
         'isVideo': data.get('isVideo')
     }, to=target_to)
-    print(f"[OFFER] Emitted to {target_to}")
 
-@socketio.on('answer')
-def handle_answer(data):
-    target_to = data.get('to')
-    print(f"[ANSWER] From: {request.sid} -> To: {target_to}")
-    emit('answer', {'from': request.sid, 'answer': data.get('answer')}, to=target_to)
+@sio.on('answer')
+async def handle_answer(sid, data):
+    await sio.emit('answer', {'from': sid, 'answer': data.get('answer')}, to=data.get('to'))
 
-@socketio.on('ice-candidate')
-def handle_ice_candidate(data):
-    target_to = data.get('to')
-    # Too many candidates to log all, but log the first few
-    # print(f"[ICE] From: {request.sid} -> To: {target_to}")
-    emit('ice-candidate', {'from': request.sid, 'candidate': data.get('candidate')}, to=target_to)
+@sio.on('ice-candidate')
+async def handle_ice_candidate(sid, data):
+    await sio.emit('ice-candidate', {'from': sid, 'candidate': data.get('candidate')}, to=data.get('to'))
 
-@socketio.on('call-rejected')
-def handle_call_rejected(data):
-    target_to = data.get('to')
-    print(f"[REJECTED] From: {request.sid} -> To: {target_to}")
-    emit('call-rejected', {'from': request.sid}, to=target_to)
+@sio.on('call-rejected')
+async def handle_call_rejected(sid, data):
+    await sio.emit('call-rejected', {'from': sid}, to=data.get('to'))
 
-@socketio.on('end-call')
-def handle_end_call(data):
-    target_to = data.get('to')
-    print(f"[END-CALL] From: {request.sid} -> To: {target_to}")
-    emit('end-call', {'from': request.sid}, to=target_to)
+@sio.on('end-call')
+async def handle_end_call(sid, data):
+    await sio.emit('end-call', {'from': sid}, to=data.get('to'))
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    user_info = users.pop(request.sid, None)
+@sio.on('disconnect')
+async def handle_disconnect(sid):
+    user_info = connected_users.pop(sid, None)
     if user_info:
-        username = user_info['name']
         family_id = user_info['family_id']
         room = f"family_{family_id}"
-        print(f"[DISCONNECT] ID: {request.sid} ({username})")
-        family_members = [{"id": sid, "name": u["name"]} for sid, u in users.items() if u["family_id"] == family_id]
-        emit('user-list', family_members, to=room)
+        family_members = [{"id": s, "name": u["name"]} for s, u in connected_users.items() if u["family_id"] == family_id]
+        await sio.emit('user-list', family_members, room=room)
+
+# Mount static files after all routes are defined
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+
+# Socket.IO ASGI App wrapper
+sio_asgi_app = socketio.ASGIApp(sio, app)
 
 if __name__ == "__main__":
-    # use_reloader=False is critical — the reloader forks a child process which resets
-    # the in-memory users={} dict, making all connected clients invisible to each other.
-    socketio.run(app, host='0.0.0.0', port=3000, debug=True, use_reloader=False)
+    import uvicorn
+    uvicorn.run("flaskr.app:sio_asgi_app", host="0.0.0.0", port=3000, reload=False)
+

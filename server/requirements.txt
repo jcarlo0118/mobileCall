@@ -1,8 +1,11 @@
-Flask
-Flask-CORS
-Flask-SocketIO
+fastapi
+uvicorn
+python-socketio
 bcrypt
 opencv-python-headless
 pillow
 PyJWT
 pyopenssl
+python-multipart
+jinja2
+aiofiles

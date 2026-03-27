@@ -744,7 +744,7 @@ export default function App() {
                 <Pressable className="p-4 rounded-xl bg-purple-600 items-center border border-purple-700" onPress={async () => {
                    const baseUrl = getBaseUrl();
                    try {
-                     await axios.post(`${baseUrl}/api/profile`, { role: userProfile.role, age: userProfile.age }, getAuthHeaders());
+                     await axios.post(`${baseUrl}/api/profile/update`, { role: userProfile.role, age: userProfile.age }, getAuthHeaders());
                      Alert.alert('Success', 'Profile updated');
                    } catch (e) { Alert.alert('Error', 'Update failed'); }
                 }}>
@@ -763,7 +763,7 @@ export default function App() {
                   <Pressable className="p-4 rounded-xl bg-purple-600 items-center border border-purple-700" onPress={async () => {
                     const baseUrl = getBaseUrl();
                     try {
-                      await axios.post(`${baseUrl}/api/family/create`, {}, getAuthHeaders());
+                      await axios.post(`${baseUrl}/api/family/create`, { name: `${username}'s Family` }, getAuthHeaders());
                       fetchProfile();
                     } catch(e) {}
                   }}>
@@ -801,11 +801,11 @@ export default function App() {
                 pendingInvitations.map((inv, i) => (
                   <View key={i} className="p-5 bg-bg-card rounded-2xl mb-5 border border-gray-800">
                     <Text className="font-bold text-white">Family Invite</Text>
-                    <Text className="my-2 text-text-dim">You have been invited to join a family.</Text>
+                    <Text className="my-2 text-text-dim">You have been invited to join the {inv.family_name} family.</Text>
                     <View className="flex-row gap-2.5">
                       <Pressable className="flex-1 p-3 rounded-xl bg-emerald-500 items-center justify-center" onPress={async () => {
                         const baseUrl = getBaseUrl();
-                        await axios.post(`${baseUrl}/api/family/accept/${inv.id}`, {}, getAuthHeaders());
+                        await axios.post(`${baseUrl}/api/notifications/respond`, { invite_id: inv.id, response: 'accepted' }, getAuthHeaders());
                         fetchNotifications();
                         fetchProfile();
                       }}>
@@ -813,7 +813,7 @@ export default function App() {
                       </Pressable>
                       <Pressable className="flex-1 p-3 rounded-xl bg-red-500 items-center justify-center" onPress={async () => {
                         const baseUrl = getBaseUrl();
-                        await axios.post(`${baseUrl}/api/family/decline/${inv.id}`, {}, getAuthHeaders());
+                        await axios.post(`${baseUrl}/api/notifications/respond`, { invite_id: inv.id, response: 'rejected' }, getAuthHeaders());
                         fetchNotifications();
                       }}>
                         <Text className="text-white font-bold">Decline</Text>
